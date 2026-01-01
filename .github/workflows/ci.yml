@@ -263,7 +263,7 @@ jobs:
       - name: Checkout tap repo
         uses: actions/checkout@v6
         with:
-          repository: tobilg/homebrew-ai-observer
+          repository: tobilg/ai-observer-homebrew
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
