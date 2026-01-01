@@ -115,23 +115,16 @@ jobs:
           ./bin/ai-observer --version
           ./bin/ai-observer --version | grep -q "${{ steps.version.outputs.version }}" || (echo "Version mismatch!" && exit 1)
 
-      - name: Create dist directory
-        shell: bash
-        run: mkdir -p dist
-
-      - name: Create archive (tar.gz)
-        if: matrix.goos != 'windows'
+      - name: Create archive
         shell: bash
         run: |
+          mkdir -p dist
           cp bin/${{ matrix.artifact_name }} ${{ matrix.artifact_name }}
-          tar -czvf dist/${{ matrix.asset_name }}-${{ steps.version.outputs.version }}.tar.gz ${{ matrix.artifact_name }}
-
-      - name: Create archive (zip)
-        if: matrix.goos == 'windows'
-        shell: bash
-        run: |
-          cp bin/${{ matrix.artifact_name }} ${{ matrix.artifact_name }}
-          zip dist/${{ matrix.asset_name }}-${{ steps.version.outputs.version }}.zip ${{ matrix.artifact_name }}
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a -tzip "dist/${{ matrix.asset_name }}-${{ steps.version.outputs.version }}.zip" "${{ matrix.artifact_name }}"
+          else
+            tar -czvf "dist/${{ matrix.asset_name }}-${{ steps.version.outputs.version }}.tar.gz" "${{ matrix.artifact_name }}"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
