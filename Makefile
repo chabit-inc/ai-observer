@@ -12,6 +12,14 @@ LDFLAGS ?= -s -w -buildid= \
 	-X 'github.com/tobilg/ai-observer/internal/version.BuildDate=$(BUILD_DATE)'
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
 
+# Binary extension (.exe on Windows)
+ifeq ($(GOOS),windows)
+	BINARY_EXT := .exe
+else
+	BINARY_EXT :=
+endif
+BINARY_NAME := ai-observer$(BINARY_EXT)
+
 # Default target (backend depends on frontend, so just build backend)
 all: backend
 
@@ -20,7 +28,7 @@ backend: frontend
 	@echo "Building backend..."
 	cd backend && \
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) GOFLAGS="$(GOFLAGS)" \
-	go build -ldflags "$(LDFLAGS)" -o ../bin/ai-observer ./cmd/server
+	go build -ldflags "$(LDFLAGS)" -o ../bin/$(BINARY_NAME) ./cmd/server
 
 backend-dev:
 	@echo "Starting backend in development mode..."
