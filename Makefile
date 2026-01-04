@@ -1,4 +1,4 @@
-.PHONY: all backend frontend backend-dev backend-test backend-lint backend-coverage frontend-dev frontend-test frontend-lint frontend-coverage dev clean test lint coverage setup help
+.PHONY: all backend frontend backend-dev backend-test backend-lint backend-coverage frontend-dev frontend-test frontend-lint frontend-coverage dev clean test lint coverage setup help release-notes
 
 # Version information
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -27,12 +27,13 @@ all: backend
 backend: frontend
 	@echo "Building backend..."
 	cd backend && \
+	go clean -cache && \
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) GOFLAGS="$(GOFLAGS)" \
 	go build -ldflags "$(LDFLAGS)" -o ../bin/$(BINARY_NAME) ./cmd/server
 
 backend-dev:
 	@echo "Starting backend in development mode..."
-	cd backend && go run ./cmd/server
+	cd backend && AI_OBSERVER_DATABASE_PATH=$(CURDIR)/data/ai-observer.duckdb go run ./cmd/server
 
 backend-test:
 	@echo "Running backend tests..."
@@ -95,6 +96,10 @@ setup:
 	cd backend && go mod download
 	cd frontend && pnpm install
 
+# Release notes generation
+release-notes:
+	@./scripts/generate-release-notes.sh $(TAG)
+
 # Help
 help:
 	@echo "Available targets:"
@@ -111,4 +116,5 @@ help:
 	@echo "  lint              - Run linters"
 	@echo "  clean             - Remove build artifacts"
 	@echo "  setup             - Install dependencies"
+	@echo "  release-notes     - Generate release notes with Claude (TAG=vX.X.X)"
 	@echo "  help              - Show this help message"
