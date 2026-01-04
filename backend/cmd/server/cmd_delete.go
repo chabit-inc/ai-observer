@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/tobilg/ai-observer/internal/config"
@@ -56,48 +55,16 @@ Options:
 		printFlags(fs)
 	}
 
-	// Extract positional argument (scope) from anywhere in args
-	// Go's flag package stops parsing at first non-flag argument,
-	// so we need to separate scope from flags before parsing
-	var flagArgs []string
-	skipNext := false
-	for i, arg := range args {
-		if skipNext {
-			skipNext = false
-			flagArgs = append(flagArgs, arg)
-			continue
-		}
-		if isFlag(arg) {
-			flagArgs = append(flagArgs, arg)
-			// Check if this flag takes a value (not a boolean flag)
-			// Skip the next arg if it's a value flag
-			flagName := strings.TrimLeft(arg, "-")
-			if flagName == "from" || flagName == "to" || flagName == "service" {
-				skipNext = true
-			}
-			continue
-		}
-		// Non-flag argument - check if it's a valid scope
-		if flags.Scope == "" && isValidScope(arg) {
-			flags.Scope = arg
-		} else {
-			// Unknown positional arg, could be a flag value we missed
-			// Check if previous arg was a flag
-			if i > 0 && isFlag(args[i-1]) {
-				flagArgs = append(flagArgs, arg)
-			}
-		}
-	}
-
-	if err := fs.Parse(flagArgs); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 
+	flags.Scope = fs.Arg(0)
 	return flags, nil
 }
 
 func runDelete(args []string) error {
-	flags, err := parseDeleteFlags(args)
+	flags, err := parseDeleteFlags(reorderArgs(args))
 	if err != nil {
 		return err
 	}
@@ -164,19 +131,4 @@ func runDelete(args []string) error {
 
 	ctx := context.Background()
 	return deleter.Run(ctx, store, opts)
-}
-
-// isFlag returns true if the argument looks like a flag (starts with -)
-func isFlag(arg string) bool {
-	return strings.HasPrefix(arg, "-")
-}
-
-// isValidScope returns true if the argument is a valid delete scope
-func isValidScope(arg string) bool {
-	switch arg {
-	case "logs", "metrics", "traces", "all":
-		return true
-	default:
-		return false
-	}
 }

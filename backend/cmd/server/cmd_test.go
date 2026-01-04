@@ -288,6 +288,74 @@ func TestRunSetup(t *testing.T) {
 	})
 }
 
+// Tests for reorderArgs
+func TestReorderArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "positional first",
+			input:    []string{"all", "--output", "./export"},
+			expected: []string{"--output", "./export", "all"},
+		},
+		{
+			name:     "flags first",
+			input:    []string{"--output", "./export", "all"},
+			expected: []string{"--output", "./export", "all"},
+		},
+		{
+			name:     "mixed order",
+			input:    []string{"all", "--from", "2025-01-01", "--to", "2025-01-31"},
+			expected: []string{"--from", "2025-01-01", "--to", "2025-01-31", "all"},
+		},
+		{
+			name:     "positional between flags",
+			input:    []string{"claude-code", "--dry-run", "--verbose"},
+			expected: []string{"--dry-run", "--verbose", "claude-code"},
+		},
+		{
+			name:     "multiple positional args",
+			input:    []string{"arg1", "--flag", "value", "arg2"},
+			expected: []string{"--flag", "value", "arg1", "arg2"},
+		},
+		{
+			name:     "empty args",
+			input:    []string{},
+			expected: []string{},
+		},
+		{
+			name:     "only positional",
+			input:    []string{"all"},
+			expected: []string{"all"},
+		},
+		{
+			name:     "only flags",
+			input:    []string{"--output", "./export", "--dry-run"},
+			expected: []string{"--output", "./export", "--dry-run"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := reorderArgs(tt.input)
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("length mismatch: got %d, want %d", len(result), len(tt.expected))
+				return
+			}
+
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Errorf("reorderArgs(%v) = %v, want %v", tt.input, result, tt.expected)
+					break
+				}
+			}
+		})
+	}
+}
+
 // Tests for parseImportFlags
 func TestParseImportFlags(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {

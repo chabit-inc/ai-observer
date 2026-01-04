@@ -137,3 +137,31 @@ func parseLogLevel(level string) slog.Level {
 		return slog.LevelInfo
 	}
 }
+
+// reorderArgs moves flags before positional arguments so Go's flag package parses them correctly.
+// Example: ["all", "--output", "./export"] -> ["--output", "./export", "all"]
+func reorderArgs(args []string) []string {
+	var flags []string
+	var positional []string
+
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+			// Check if next arg is a flag value (not another flag)
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				// Could be a flag value, include it with the flag
+				flags = append(flags, args[i+1])
+				i += 2
+				continue
+			}
+			i++
+		} else {
+			positional = append(positional, arg)
+			i++
+		}
+	}
+
+	return append(flags, positional...)
+}

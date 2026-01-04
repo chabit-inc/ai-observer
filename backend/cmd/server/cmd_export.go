@@ -71,7 +71,7 @@ Options:
 }
 
 func runExport(args []string) error {
-	flags, err := parseExportFlags(args)
+	flags, err := parseExportFlags(reorderArgs(args))
 	if err != nil {
 		return err
 	}

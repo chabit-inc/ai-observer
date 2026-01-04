@@ -68,7 +68,7 @@ Options:
 }
 
 func runImport(args []string) error {
-	flags, err := parseImportFlags(args)
+	flags, err := parseImportFlags(reorderArgs(args))
 	if err != nil {
 		return err
 	}
