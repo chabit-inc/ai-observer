@@ -28,9 +28,14 @@ PREV_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "")
 if [ -n "$PREV_TAG" ]; then
     echo "Getting commits from $PREV_TAG to $TAG..."
     COMMITS=$(git log "$PREV_TAG".."$TAG" --pretty=format:"- %s" 2>/dev/null || echo "")
+    echo "Getting code diff from $PREV_TAG to $TAG..."
+    DIFF=$(git diff "$PREV_TAG".."$TAG" --stat 2>/dev/null || echo "")
+    DIFF_FULL=$(git diff "$PREV_TAG".."$TAG" -- '*.go' '*.ts' '*.tsx' '*.json' '*.md' 2>/dev/null | head -c 50000 || echo "")
 else
     echo "Getting all commits up to $TAG..."
     COMMITS=$(git log "$TAG" --pretty=format:"- %s" 2>/dev/null || echo "")
+    DIFF=""
+    DIFF_FULL=""
 fi
 
 if [ -z "$COMMITS" ]; then
@@ -42,35 +47,51 @@ echo ""
 echo "Commits:"
 echo "$COMMITS"
 echo ""
+echo "Files changed:"
+echo "$DIFF"
+echo ""
 
 # Create prompt for Claude
-PROMPT="You are generating a release summary for AI Observer $TAG, an OpenTelemetry-compatible observability backend for AI coding tools (Claude Code, Gemini CLI, Codex CLI).
+PROMPT="You are generating release notes for AI Observer $TAG, an OpenTelemetry-compatible observability backend for AI coding tools (Claude Code, Gemini CLI, Codex CLI).
 
-Based on these commits since the last release, generate a concise, user-friendly summary in markdown format:
+Analyze the ACTUAL CODE CHANGES below to understand what was implemented, not just the commit messages. Write a detailed, user-friendly summary that explains the value of these changes.
 
+## Commit Messages (for context only)
 $COMMITS
 
-Format the output with these sections (only include sections that have content):
+## Files Changed (summary)
+$DIFF
+
+## Code Diff (analyze this carefully)
+$DIFF_FULL
+
+---
+
+Generate release notes in markdown format with these sections (only include sections that have relevant content):
 
 ## Highlights
-(1-2 sentence summary of the most important changes)
+A compelling 2-3 sentence summary of the most important changes. Explain WHY these changes matter to users.
 
 ## New Features
-(list new features, if any)
+Detailed descriptions of new functionality. For each feature:
+- What it does
+- How users can use it (brief usage example if applicable)
 
 ## Improvements
-(list improvements/enhancements, if any)
+Enhancements to existing functionality. Explain what's better now.
 
 ## Bug Fixes
-(list fixes, if any)
+What was broken and how it was fixed. Be specific about the issue.
+
+## Technical Changes
+Notable internal changes that advanced users might care about (API changes, performance improvements, dependency updates).
 
 Rules:
-- Only include sections that have content
-- Be concise - one line per item
-- Do not include commit hashes
-- Group related changes together
-- Use clear, user-friendly language
-- Skip minor changes like typos, small refactors, CI tweaks
+- Analyze the actual code diff to understand what changed - don't just rephrase commit messages
+- Be specific and detailed - mention actual function names, endpoints, or features affected
+- Explain the user benefit of each change
+- Skip trivial changes (formatting, minor typos, CI config tweaks)
+- Use clear, professional language
 - Output ONLY the markdown, no preamble or explanation"
 
 # Generate release notes using Claude CLI
