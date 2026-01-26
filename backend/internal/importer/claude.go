@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,11 +113,21 @@ type claudeJSONLEntry struct {
 }
 
 type claudeMessage struct {
-	ID    string       `json:"id,omitempty"`
-	Model string       `json:"model,omitempty"`
-	Role  string       `json:"role,omitempty"`
-	Type  string       `json:"type,omitempty"`
-	Usage *claudeUsage `json:"usage,omitempty"`
+	ID      string          `json:"id,omitempty"`
+	Model   string          `json:"model,omitempty"`
+	Role    string          `json:"role,omitempty"`
+	Type    string          `json:"type,omitempty"`
+	Content []claudeContent `json:"content,omitempty"`
+	Usage   *claudeUsage    `json:"usage,omitempty"`
+}
+
+type claudeContent struct {
+	Type      string `json:"type,omitempty"`        // "text", "tool_use", "tool_result"
+	Text      string `json:"text,omitempty"`        // message text
+	Name      string `json:"name,omitempty"`        // tool name (for tool_use)
+	Input     any    `json:"input,omitempty"`       // tool input (for tool_use)
+	Content   string `json:"content,omitempty"`     // tool result content (for tool_result)
+	ToolUseID string `json:"tool_use_id,omitempty"` // reference to tool_use (for tool_result)
 }
 
 type claudeUsage struct {
@@ -148,7 +159,8 @@ func (p *ClaudeParser) ParseFile(ctx context.Context, path string) (*ImportResul
 	scanner.Buffer(buf, 1024*1024)
 
 	lineNum := 0
-	seenRequests := make(map[string]bool) // For deduplication
+	messageIndex := 0                     // Track message order for transcripts
+	seenRequests := make(map[string]bool) // For deduplication of metrics
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -167,23 +179,14 @@ func (p *ClaudeParser) ParseFile(ctx context.Context, path string) (*ImportResul
 			continue
 		}
 
-		// Skip entries without message or usage
-		if entry.Message == nil || entry.Message.Usage == nil {
+		// Skip entries without message
+		if entry.Message == nil {
 			continue
 		}
 
-		// Only process assistant entries (root type field)
-		if entry.Type != "assistant" {
+		// Only process user and assistant entries for transcripts
+		if entry.Type != "user" && entry.Type != "assistant" {
 			continue
-		}
-
-		// Deduplication using messageId:requestId
-		dedupKey := fmt.Sprintf("%s:%s", entry.Message.ID, entry.RequestID)
-		if entry.Message.ID != "" && entry.RequestID != "" {
-			if seenRequests[dedupKey] {
-				continue
-			}
-			seenRequests[dedupKey] = true
 		}
 
 		// Parse timestamp
@@ -204,60 +207,80 @@ func (p *ClaudeParser) ParseFile(ctx context.Context, path string) (*ImportResul
 		}
 
 		// Use session ID from entry if available
-		if entry.SessionID != "" && result.SessionID == "" {
-			result.SessionID = entry.SessionID
+		sessionID := entry.SessionID
+		if sessionID == "" {
+			sessionID = result.SessionID
+		}
+		if sessionID != "" && result.SessionID == "" {
+			result.SessionID = sessionID
 		}
 
-		// Create log record
-		logRecord := api.LogRecord{
-			Timestamp:      ts,
-			ServiceName:    SourceClaude.ServiceName(),
-			SeverityText:   "INFO",
-			SeverityNumber: 9,
-			Body:           "api_request",
-			LogAttributes: map[string]string{
-				"event.name":      "claude_code.api_request",
-				"session.id":      entry.SessionID,
-				"model":           entry.Message.Model,
-				"import_source":   "local_jsonl",
-			},
-		}
-		if entry.Cwd != "" {
-			logRecord.LogAttributes["cwd"] = entry.Cwd
-		}
-		if entry.RequestID != "" {
-			logRecord.LogAttributes["request_id"] = entry.RequestID
-		}
-		result.Logs = append(result.Logs, logRecord)
+		// Create transcript log records from message content
+		transcriptLogs := p.createTranscriptLogs(entry, ts, sessionID, &messageIndex)
+		result.Logs = append(result.Logs, transcriptLogs...)
 
-		// Create metrics
-		usage := entry.Message.Usage
-		model := entry.Message.Model
+		// For assistant entries with usage data, also create metrics
+		if entry.Type == "assistant" && entry.Message.Usage != nil {
+			// Deduplication using messageId:requestId for metrics only
+			dedupKey := fmt.Sprintf("%s:%s", entry.Message.ID, entry.RequestID)
+			if entry.Message.ID != "" && entry.RequestID != "" {
+				if seenRequests[dedupKey] {
+					continue
+				}
+				seenRequests[dedupKey] = true
+			}
 
-		// Token usage metrics (creates both regular and user-facing variants)
-		if usage.InputTokens > 0 {
-			result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "input", float64(usage.InputTokens))...)
-		}
-		if usage.OutputTokens > 0 {
-			result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "output", float64(usage.OutputTokens))...)
-		}
-		if usage.CacheCreationInputTokens > 0 {
-			result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "cacheCreation", float64(usage.CacheCreationInputTokens))...)
-		}
-		if usage.CacheReadInputTokens > 0 {
-			result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "cacheRead", float64(usage.CacheReadInputTokens))...)
-		}
+			// Create api_request log record (existing behavior)
+			logRecord := api.LogRecord{
+				Timestamp:      ts,
+				ServiceName:    SourceClaude.ServiceName(),
+				SeverityText:   "INFO",
+				SeverityNumber: 9,
+				Body:           "api_request",
+				LogAttributes: map[string]string{
+					"event.name":    "claude_code.api_request",
+					"session.id":    sessionID,
+					"model":         entry.Message.Model,
+					"import_source": "local_jsonl",
+				},
+			}
+			if entry.Cwd != "" {
+				logRecord.LogAttributes["cwd"] = entry.Cwd
+			}
+			if entry.RequestID != "" {
+				logRecord.LogAttributes["request_id"] = entry.RequestID
+			}
+			result.Logs = append(result.Logs, logRecord)
 
-		// Cost metrics using pricing mode (creates both regular and user-facing variants)
-		tokenUsage := pricing.ClaudeTokenUsage{
-			InputTokens:              int64(usage.InputTokens),
-			OutputTokens:             int64(usage.OutputTokens),
-			CacheCreationInputTokens: int64(usage.CacheCreationInputTokens),
-			CacheReadInputTokens:     int64(usage.CacheReadInputTokens),
-		}
-		cost := pricing.GetClaudeCostWithMode(p.pricingMode, model, tokenUsage, entry.CostUSD)
-		if cost > 0 {
-			result.Metrics = append(result.Metrics, createCostMetrics(ts, model, cost)...)
+			// Create metrics
+			usage := entry.Message.Usage
+			model := entry.Message.Model
+
+			// Token usage metrics (creates both regular and user-facing variants)
+			if usage.InputTokens > 0 {
+				result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "input", float64(usage.InputTokens))...)
+			}
+			if usage.OutputTokens > 0 {
+				result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "output", float64(usage.OutputTokens))...)
+			}
+			if usage.CacheCreationInputTokens > 0 {
+				result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "cacheCreation", float64(usage.CacheCreationInputTokens))...)
+			}
+			if usage.CacheReadInputTokens > 0 {
+				result.Metrics = append(result.Metrics, createTokenMetrics(ts, model, "cacheRead", float64(usage.CacheReadInputTokens))...)
+			}
+
+			// Cost metrics using pricing mode (creates both regular and user-facing variants)
+			tokenUsage := pricing.ClaudeTokenUsage{
+				InputTokens:              int64(usage.InputTokens),
+				OutputTokens:             int64(usage.OutputTokens),
+				CacheCreationInputTokens: int64(usage.CacheCreationInputTokens),
+				CacheReadInputTokens:     int64(usage.CacheReadInputTokens),
+			}
+			cost := pricing.GetClaudeCostWithMode(p.pricingMode, model, tokenUsage, entry.CostUSD)
+			if cost > 0 {
+				result.Metrics = append(result.Metrics, createCostMetrics(ts, model, cost)...)
+			}
 		}
 
 		result.RecordCount++
@@ -268,6 +291,85 @@ func (p *ClaudeParser) ParseFile(ctx context.Context, path string) (*ImportResul
 	}
 
 	return result, nil
+}
+
+// createTranscriptLogs creates transcript log records from message content
+func (p *ClaudeParser) createTranscriptLogs(entry claudeJSONLEntry, ts time.Time, sessionID string, messageIndex *int) []api.LogRecord {
+	var logs []api.LogRecord
+
+	if entry.Message == nil || len(entry.Message.Content) == 0 {
+		return logs
+	}
+
+	// Determine base role from entry type
+	baseRole := entry.Type // "user" or "assistant"
+
+	for _, content := range entry.Message.Content {
+		var body string
+		var role string
+		attrs := map[string]string{
+			"event.name":     "transcript.message",
+			"session.id":     sessionID,
+			"message.index":  strconv.Itoa(*messageIndex),
+			"message.role":   baseRole,
+			"import_source":  "local_jsonl",
+		}
+
+		if entry.Message.Model != "" {
+			attrs["model"] = entry.Message.Model
+		}
+		if entry.Message.ID != "" {
+			attrs["message.id"] = entry.Message.ID
+		}
+
+		switch content.Type {
+		case "text":
+			body = content.Text
+			role = baseRole
+		case "tool_use":
+			role = "tool_use"
+			attrs["message.role"] = role
+			attrs["tool.name"] = content.Name
+			if content.Input != nil {
+				if inputBytes, err := json.Marshal(content.Input); err == nil {
+					attrs["tool.input"] = string(inputBytes)
+				}
+			}
+			body = fmt.Sprintf("Tool call: %s", content.Name)
+		case "tool_result":
+			role = "tool_result"
+			attrs["message.role"] = role
+			if content.ToolUseID != "" {
+				attrs["tool.use_id"] = content.ToolUseID
+			}
+			// Store tool output in attrs for consistent extraction
+			if content.Content != "" {
+				attrs["tool.output"] = content.Content
+			}
+			body = content.Content
+		default:
+			// Skip unknown content types
+			continue
+		}
+
+		// Skip empty content
+		if body == "" && content.Type == "text" {
+			continue
+		}
+
+		logRecord := api.LogRecord{
+			Timestamp:      ts,
+			ServiceName:    SourceClaude.ServiceName(),
+			SeverityText:   "INFO",
+			SeverityNumber: 9,
+			Body:           body,
+			LogAttributes:  attrs,
+		}
+		logs = append(logs, logRecord)
+		*messageIndex++
+	}
+
+	return logs
 }
 
 // Metric name constants for Claude Code imports

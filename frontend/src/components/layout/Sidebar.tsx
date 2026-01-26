@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { GitBranch, BarChart3, FileText, BookOpen, ChevronDown } from 'lucide-react'
+import { GitBranch, BarChart3, FileText, BookOpen, ChevronDown, MessageSquare } from 'lucide-react'
 import {
   Collapsible,
   CollapsibleContent,
@@ -21,6 +21,7 @@ const insightsItems = [
   { to: '/metrics', icon: BarChart3, label: 'Metrics' },
   { to: '/logs', icon: FileText, label: 'Logs' },
   { to: '/traces', icon: GitBranch, label: 'Traces' },
+  { to: '/sessions', icon: MessageSquare, label: 'Sessions' },
 ]
 
 export function AppSidebar() {

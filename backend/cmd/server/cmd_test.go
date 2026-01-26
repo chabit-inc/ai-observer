@@ -446,13 +446,6 @@ func TestRunImportValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("purge without dates", func(t *testing.T) {
-		err := runImport([]string{"--purge", "claude-code"})
-		if err == nil {
-			t.Error("expected error for purge without dates")
-		}
-	})
-
 	t.Run("from after to", func(t *testing.T) {
 		err := runImport([]string{"--from", "2025-12-31", "--to", "2025-01-01", "claude-code"})
 		if err == nil {

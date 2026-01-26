@@ -53,9 +53,9 @@ export const standardTooltipStyle = {
 
 // Axis styling for compact charts
 export const compactAxisStyle = {
-  stroke: 'hsl(var(--muted-foreground))',
-  axisLine: { stroke: '#9ca3af', strokeWidth: 1 },
-  tickLine: { stroke: '#9ca3af', strokeWidth: 1 },
+  stroke: 'var(--color-muted-foreground)',
+  axisLine: { stroke: 'var(--color-muted-foreground)', strokeWidth: 1 },
+  tickLine: { stroke: 'var(--color-muted-foreground)', strokeWidth: 1 },
 }
 
 // Common series data type

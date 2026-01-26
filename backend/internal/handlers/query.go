@@ -248,6 +248,38 @@ func (h *Handlers) GetLogLevels(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, levels)
 }
 
+// QuerySessions handles GET /api/sessions
+func (h *Handlers) QuerySessions(w http.ResponseWriter, r *http.Request) {
+	service := r.URL.Query().Get("service")
+	from, to := parseTimeRange(r)
+	limit, offset := parsePagination(r)
+
+	resp, err := h.store.QuerySessions(r.Context(), service, from, to, limit, offset)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+// GetSessionTranscript handles GET /api/sessions/{sessionId}/transcript
+func (h *Handlers) GetSessionTranscript(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	if sessionID == "" {
+		api.WriteError(w, http.StatusBadRequest, "sessionId is required")
+		return
+	}
+
+	resp, err := h.store.GetSessionTranscript(r.Context(), sessionID)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
 // ListServices handles GET /api/services
 func (h *Handlers) ListServices(w http.ResponseWriter, r *http.Request) {
 	services, err := h.store.GetServices(r.Context())

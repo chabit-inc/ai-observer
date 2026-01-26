@@ -2,6 +2,8 @@
 // Provides human-readable names, descriptions, and formatting for metrics from
 // Claude Code, Gemini CLI, and Codex CLI
 
+import { Bot, Terminal, Sparkles, type LucideIcon } from 'lucide-react'
+
 // ============================================================================
 // Type Definitions
 // ============================================================================
@@ -1253,8 +1255,9 @@ export function formatMetricValue(value: number | null, unit: UnitFormat): strin
  * Format a number with K/M abbreviations
  */
 export function formatNumber(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  if (Math.abs(n) >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
+  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(2)}K`
   return Number.isInteger(n) ? n.toString() : n.toFixed(2)
 }
 
@@ -1294,7 +1297,7 @@ export function formatCurrency(amount: number): string {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 2,
   }).format(amount)
 }
 
@@ -1394,5 +1397,21 @@ export function getServiceDisplayName(serviceName: string): string {
       return 'Codex CLI'
     default:
       return serviceName // fallback to original
+  }
+}
+
+/**
+ * Get icon component for a service name (from API/backend)
+ */
+export function getServiceIcon(serviceName: string): LucideIcon {
+  switch (serviceName) {
+    case 'claude-code':
+      return Bot
+    case 'gemini-cli':
+      return Sparkles
+    case 'codex_cli_rs':
+      return Terminal
+    default:
+      return Bot // fallback
   }
 }

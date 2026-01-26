@@ -92,3 +92,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* highlight.js: keep our code block background (provided by bg-muted on <pre>) */
+.hljs {
+  background: transparent !important;
+}

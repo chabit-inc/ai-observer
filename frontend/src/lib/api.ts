@@ -1,6 +1,7 @@
 import type { TracesResponse, SpansResponse } from '@/types/traces'
 import type { MetricsResponse, TimeSeriesResponse, MetricNamesResponse, TimeSeries } from '@/types/metrics'
 import type { LogsResponse, LogLevelsResponse } from '@/types/logs'
+import type { SessionsResponse, TranscriptResponse } from '@/types/sessions'
 import type {
   Dashboard,
   DashboardWithWidgets,
@@ -369,6 +370,22 @@ export const api = {
 
   async getLogLevels(options?: FetchOptions): Promise<LogLevelsResponse> {
     return fetchJSON(`${API_BASE}/logs/levels`, options)
+  },
+
+  // Sessions
+  async getSessions(params: QueryParams = {}, options?: FetchOptions): Promise<SessionsResponse> {
+    const query = buildQueryString({
+      service: params.service,
+      from: params.from,
+      to: params.to,
+      limit: params.limit ?? 50,
+      offset: params.offset ?? 0,
+    })
+    return fetchJSON(`${API_BASE}/sessions${query}`, options)
+  },
+
+  async getSessionTranscript(sessionId: string, options?: FetchOptions): Promise<TranscriptResponse> {
+    return fetchJSON(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/transcript`, options)
   },
 
   // Dashboards

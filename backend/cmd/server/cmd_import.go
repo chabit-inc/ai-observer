@@ -94,11 +94,6 @@ func runImport(args []string) error {
 		return err
 	}
 
-	// Validate purge requires date range
-	if flags.Purge && (fromDate == nil || toDate == nil) {
-		return fmt.Errorf("--purge requires both --from and --to dates\nUsage: ai-observer import <tool> --purge --from YYYY-MM-DD --to YYYY-MM-DD")
-	}
-
 	// Validate date range if both specified
 	if fromDate != nil && toDate != nil && fromDate.After(*toDate) {
 		return fmt.Errorf("--from date must be before --to date")

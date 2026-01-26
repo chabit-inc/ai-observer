@@ -182,3 +182,49 @@ type MetricNamesResponse struct {
 type BreakdownValuesResponse struct {
 	Values []string `json:"values"`
 }
+
+// Session represents a conversation session summary
+type Session struct {
+	SessionID    string    `json:"sessionId"`
+	ServiceName  string    `json:"serviceName"`
+	StartTime    time.Time `json:"startTime"`
+	LastTime     time.Time `json:"lastTime"`
+	MessageCount int       `json:"messageCount"`
+	Model        string    `json:"model,omitempty"`
+}
+
+// SessionsResponse for listing sessions
+type SessionsResponse struct {
+	Sessions []Session `json:"sessions"`
+	Total    int       `json:"total"`
+	HasMore  bool      `json:"hasMore"`
+}
+
+// TranscriptMessage represents a single message in a transcript
+type TranscriptMessage struct {
+	Timestamp    time.Time `json:"timestamp"`
+	Role         string    `json:"role"`
+	Content      string    `json:"content"`
+	Index        int       `json:"index"`
+	Model        string    `json:"model,omitempty"`
+	ToolName     string    `json:"toolName,omitempty"`
+	ToolInput    string    `json:"toolInput,omitempty"`
+	ToolOutput   string    `json:"toolOutput,omitempty"`   // Tool execution output (from imports)
+	InputTokens  int       `json:"inputTokens,omitempty"`  // Input token count
+	OutputTokens int       `json:"outputTokens,omitempty"` // Output token count
+	CacheRead    int       `json:"cacheRead,omitempty"`    // Cache read tokens
+	CacheWrite   int       `json:"cacheWrite,omitempty"`   // Cache write tokens
+	CostUSD      float64   `json:"costUsd,omitempty"`      // Cost in USD
+	DurationMs   int       `json:"durationMs,omitempty"`   // Duration in milliseconds
+	Success      *bool     `json:"success,omitempty"`      // Tool execution success (pointer to distinguish false from unset)
+	OutputSize   int       `json:"outputSize,omitempty"`   // Tool output size in bytes
+}
+
+// TranscriptResponse contains the full transcript for a session
+type TranscriptResponse struct {
+	SessionID   string              `json:"sessionId"`
+	ServiceName string              `json:"serviceName"`
+	StartTime   time.Time           `json:"startTime"`
+	LastTime    time.Time           `json:"lastTime"`
+	Messages    []TranscriptMessage `json:"messages"`
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -15,14 +15,9 @@ import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 import { useTelemetryStore } from '@/stores/telemetryStore'
 import { useDebounce } from '@/hooks/useDebounce'
 import { usePagination } from '@/hooks/usePagination'
-import { getLocalStorageValue } from '@/hooks/useLocalStorage'
-import {
-  TIMEFRAME_OPTIONS,
-  isAbsoluteTimeSelection,
-  type TimeSelection,
-} from '@/types/dashboard'
+import { useTimeSelection } from '@/hooks/useTimeSelection'
+import { isAbsoluteTimeSelection, type TimeSelection } from '@/types/dashboard'
 import { toast } from 'sonner'
-import { calculateInterval, calculateTickInterval } from '@/lib/timeUtils'
 
 const SEVERITY_OPTIONS = ['', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL']
 
@@ -42,41 +37,11 @@ export function LogsPage() {
   const debouncedSearch = useDebounce(search, 200)
   const [expandedLog, setExpandedLog] = useState<number | null>(null)
 
-  // Get initial time selection from URL or localStorage
-  const getInitialTimeSelection = (): TimeSelection => {
-    // Check for absolute date range in URL
-    const fromParam = searchParams.get('from')
-    const toParam = searchParams.get('to')
-    if (fromParam && toParam) {
-      const from = new Date(fromParam)
-      const to = new Date(toParam)
-      if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
-        const intervalSeconds = calculateInterval(from, to)
-        const rangeDays = (to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)
-        const bucketCount = Math.ceil((rangeDays * 86400) / intervalSeconds)
-        return {
-          type: 'absolute',
-          range: {
-            from,
-            to,
-            intervalSeconds,
-            tickInterval: calculateTickInterval(bucketCount),
-          },
-        }
-      }
-    }
-
-    // Check for relative timeframe in URL or localStorage
-    const storedSelection = getLocalStorageValue<{ type: string; timeframeValue: string } | null>(TIME_SELECTION_STORAGE_KEY, null)
-    const timeframeParam = searchParams.get('timeframe')
-      || storedSelection?.timeframeValue
-      || '7d'
-    const timeframe = TIMEFRAME_OPTIONS.find((t) => t.value === timeframeParam)
-      || TIMEFRAME_OPTIONS.find((t) => t.value === '7d')!
-    return { type: 'relative', timeframe }
-  }
-
-  const [timeSelection, setTimeSelectionState] = useState<TimeSelection>(getInitialTimeSelection)
+  // Time selection with localStorage persistence
+  const { timeSelection, setTimeSelection, fromTime, toTime } = useTimeSelection({
+    storageKey: TIME_SELECTION_STORAGE_KEY,
+    searchParams,
+  })
 
   // Pagination state with localStorage persistence
   const { page, pageSize, offset, setPage, setPageSize, resetToFirstPage } = usePagination({
@@ -84,23 +49,8 @@ export function LogsPage() {
     storageKey: PAGE_SIZE_STORAGE_KEY,
   })
 
-  // Anchor time for stable pagination
-  const [anchorTime, setAnchorTime] = useState<Date>(new Date())
-
-  // Calculate from/to time based on time selection
-  const fromTime = useMemo(() => {
-    if (isAbsoluteTimeSelection(timeSelection)) {
-      return timeSelection.range.from
-    }
-    return new Date(anchorTime.getTime() - timeSelection.timeframe.durationSeconds * 1000)
-  }, [timeSelection, anchorTime])
-
-  const toTime = useMemo(() => {
-    if (isAbsoluteTimeSelection(timeSelection)) {
-      return timeSelection.range.to
-    }
-    return anchorTime
-  }, [timeSelection, anchorTime])
+  // Anchor time for tracking new logs (used by refresh button)
+  const [anchorTime, setAnchorTime] = useState<Date>(() => new Date())
 
   // Real-time logs from WebSocket (kept separate, not merged)
   const recentLogs = useTelemetryStore((state) => state.recentLogs)
@@ -123,12 +73,6 @@ export function LogsPage() {
     }
     fetchServices()
   }, [])
-
-  // Reset pagination and anchor time when filters change
-  useEffect(() => {
-    resetToFirstPage()
-    setAnchorTime(new Date())
-  }, [service, severity, debouncedSearch, timeSelection, resetToFirstPage])
 
   useEffect(() => {
     const abortController = new AbortController()
@@ -165,30 +109,20 @@ export function LogsPage() {
   }, [service, severity, debouncedSearch, fromTime, toTime, pageSize, offset])
 
   const handleTimeSelectionChange = (selection: TimeSelection) => {
-    setTimeSelectionState(selection)
+    resetToFirstPage()
+    setTimeSelection(selection) // Also persists to localStorage
 
     // Update URL params
     const params: Record<string, string> = {}
     if (service) params.service = service
     if (severity) params.severity = severity
     if (search) params.search = search
-
     if (isAbsoluteTimeSelection(selection)) {
       params.from = selection.range.from.toISOString()
       params.to = selection.range.to.toISOString()
     } else {
       params.timeframe = selection.timeframe.value
-      // Persist to localStorage
-      try {
-        localStorage.setItem(
-          TIME_SELECTION_STORAGE_KEY,
-          JSON.stringify({ type: 'relative', timeframeValue: selection.timeframe.value })
-        )
-      } catch {
-        // Ignore storage errors
-      }
     }
-
     setSearchParams(params)
   }
 
@@ -219,7 +153,10 @@ export function LogsPage() {
               />
             </div>
             <div className="w-48">
-              <Select value={service} onChange={(e) => setService(e.target.value)}>
+              <Select value={service} onChange={(e) => {
+                resetToFirstPage()
+                setService(e.target.value)
+              }}>
                 <option value="">All Services</option>
                 {services.map((s) => (
                   <option key={s} value={s}>
@@ -229,7 +166,10 @@ export function LogsPage() {
               </Select>
             </div>
             <div className="w-32">
-              <Select value={severity} onChange={(e) => setSeverity(e.target.value)}>
+              <Select value={severity} onChange={(e) => {
+                resetToFirstPage()
+                setSeverity(e.target.value)
+              }}>
                 <option value="">All Levels</option>
                 {SEVERITY_OPTIONS.filter(Boolean).map((s) => (
                   <option key={s} value={s}>
@@ -242,7 +182,10 @@ export function LogsPage() {
               <Input
                 placeholder="Search log messages..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  resetToFirstPage()
+                  setSearch(e.target.value)
+                }}
               />
             </div>
           </div>

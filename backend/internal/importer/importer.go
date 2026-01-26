@@ -90,13 +90,38 @@ func (i *Importer) Import(ctx context.Context, sources []SourceType, opts Option
 		return nil
 	}
 
+	// If purge is requested but no dates specified, derive from scanned files
+	purgeFrom := opts.FromDate
+	purgeTo := opts.ToDate
+	if opts.Purge && (purgeFrom == nil || purgeTo == nil) {
+		// Calculate date range from all files being imported
+		var minTime, maxTime time.Time
+		for _, summary := range allSummaries {
+			for _, file := range summary.Files {
+				if file.Status == "skipped" {
+					continue // Only consider files that will be imported
+				}
+				if minTime.IsZero() || file.FirstTime.Before(minTime) {
+					minTime = file.FirstTime
+				}
+				if maxTime.IsZero() || file.LastTime.After(maxTime) {
+					maxTime = file.LastTime
+				}
+			}
+		}
+		if !minTime.IsZero() && !maxTime.IsZero() {
+			purgeFrom = &minTime
+			purgeTo = &maxTime
+		}
+	}
+
 	// If purge is requested, get delete counts
-	if opts.Purge && opts.FromDate != nil && opts.ToDate != nil {
+	if opts.Purge && purgeFrom != nil && purgeTo != nil {
 		var err error
 		deleteSummary, err = deleter.Preview(ctx, i.store, deleter.Options{
 			Scope:   deleter.ScopeAll,
-			From:    *opts.FromDate,
-			To:      *opts.ToDate,
+			From:    *purgeFrom,
+			To:      *purgeTo,
 			Service: "", // Delete all services in range
 		})
 		if err != nil {
@@ -126,8 +151,8 @@ func (i *Importer) Import(ctx context.Context, sources []SourceType, opts Option
 		fmt.Println("\nDeleting existing data...")
 		_, err := deleter.Execute(ctx, i.store, deleter.Options{
 			Scope:   deleter.ScopeAll,
-			From:    *opts.FromDate,
-			To:      *opts.ToDate,
+			From:    *purgeFrom,
+			To:      *purgeTo,
 			Service: "",
 		})
 		if err != nil {
@@ -206,7 +231,14 @@ func (i *Importer) scanSource(ctx context.Context, parser SessionParser, opts Op
 			continue
 		}
 
-		summary.Add(result, StatusToString(status))
+		// Determine status string for counting
+		// When force-importing, count StatusCurrent files as "modified" instead of "skipped"
+		// so they are properly counted and the import doesn't exit early
+		statusStr := StatusToString(status)
+		if status == StatusCurrent && opts.Force {
+			statusStr = "modified"
+		}
+		summary.Add(result, statusStr)
 	}
 
 	return summary, nil

@@ -21,16 +21,13 @@ import {
 } from '@/lib/metricMetadata'
 import { toast } from 'sonner'
 import {
-  TIMEFRAME_OPTIONS,
   isAbsoluteTimeSelection,
   getTimeSelectionLabel,
   type TimeSelection,
 } from '@/types/dashboard'
 import { formatIntervalSeconds } from '@/lib/utils'
-import { getLocalStorageValue } from '@/hooks/useLocalStorage'
-import { calculateInterval, calculateTickInterval } from '@/lib/timeUtils'
+import { useTimeSelection } from '@/hooks/useTimeSelection'
 
-const DEFAULT_TIMEFRAME = '15m'
 const TIME_SELECTION_STORAGE_KEY = 'ai-observer-metrics-timeselection'
 
 export function MetricsPage() {
@@ -44,97 +41,33 @@ export function MetricsPage() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const [stacked, setStacked] = useState(true)
 
-  // Get time selection from URL (for shareable links), then localStorage, then default
-  const getInitialTimeSelection = (): TimeSelection => {
-    // Check for absolute date range in URL
-    const fromParam = searchParams.get('from')
-    const toParam = searchParams.get('to')
-    if (fromParam && toParam) {
-      const from = new Date(fromParam)
-      const to = new Date(toParam)
-      if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
-        const intervalSeconds = calculateInterval(from, to)
-        const rangeDays = (to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)
-        const bucketCount = Math.ceil((rangeDays * 86400) / intervalSeconds)
-        return {
-          type: 'absolute',
-          range: {
-            from,
-            to,
-            intervalSeconds,
-            tickInterval: calculateTickInterval(bucketCount),
-          },
-        }
-      }
-    }
-
-    // Check for relative timeframe in URL or localStorage
-    const storedSelection = getLocalStorageValue<{ type: string; timeframeValue: string } | null>(TIME_SELECTION_STORAGE_KEY, null)
-    const timeframeParam = searchParams.get('timeframe')
-      || storedSelection?.timeframeValue
-      || DEFAULT_TIMEFRAME
-    const timeframe = TIMEFRAME_OPTIONS.find((t) => t.value === timeframeParam)
-      || TIMEFRAME_OPTIONS.find((t) => t.value === DEFAULT_TIMEFRAME)!
-    return { type: 'relative', timeframe }
-  }
-
-  const [timeSelection, setTimeSelectionState] = useState<TimeSelection>(getInitialTimeSelection)
-
-  const isAbsoluteRange = isAbsoluteTimeSelection(timeSelection)
+  // Time selection with localStorage persistence
+  const { timeSelection, setTimeSelection, fromTime, toTime, isAbsoluteRange, intervalSeconds, tickInterval } = useTimeSelection({
+    storageKey: TIME_SELECTION_STORAGE_KEY,
+    searchParams,
+    defaultTimeframe: '15m',
+  })
 
   const handleTimeSelectionChange = (selection: TimeSelection) => {
-    setTimeSelectionState(selection)
+    setTimeSelection(selection) // Also persists to localStorage
 
     // Update URL params
     const newParams = new URLSearchParams(searchParams)
-
     if (isAbsoluteTimeSelection(selection)) {
-      // Absolute range: set from/to, remove timeframe
       newParams.set('from', selection.range.from.toISOString())
       newParams.set('to', selection.range.to.toISOString())
       newParams.delete('timeframe')
     } else {
-      // Relative range: set timeframe, remove from/to
       newParams.delete('from')
       newParams.delete('to')
-      if (selection.timeframe.value === DEFAULT_TIMEFRAME) {
-        newParams.delete('timeframe')
-      } else {
+      if (selection.timeframe.value !== '15m') {
         newParams.set('timeframe', selection.timeframe.value)
-      }
-      // Persist to localStorage
-      try {
-        localStorage.setItem(
-          TIME_SELECTION_STORAGE_KEY,
-          JSON.stringify({ type: 'relative', timeframeValue: selection.timeframe.value })
-        )
-      } catch {
-        // Ignore storage errors
+      } else {
+        newParams.delete('timeframe')
       }
     }
-
     setSearchParams(newParams)
   }
-
-  // Derive time range values from selection
-  const { fromTime, toTime, intervalSeconds, tickInterval } = useMemo(() => {
-    if (isAbsoluteTimeSelection(timeSelection)) {
-      return {
-        fromTime: timeSelection.range.from,
-        toTime: timeSelection.range.to,
-        intervalSeconds: timeSelection.range.intervalSeconds,
-        tickInterval: timeSelection.range.tickInterval,
-      }
-    }
-    const now = new Date()
-    const from = new Date(now.getTime() - timeSelection.timeframe.durationSeconds * 1000)
-    return {
-      fromTime: from,
-      toTime: now,
-      intervalSeconds: timeSelection.timeframe.intervalSeconds,
-      tickInterval: timeSelection.timeframe.tickInterval,
-    }
-  }, [timeSelection])
 
   // Real-time metrics from WebSocket
   const recentMetrics = useTelemetryStore((state) => state.recentMetrics)

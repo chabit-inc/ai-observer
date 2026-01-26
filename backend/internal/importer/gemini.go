@@ -92,11 +92,41 @@ type geminiSession struct {
 
 // geminiMessage represents a message in the session
 type geminiMessage struct {
-	ID        string        `json:"id"`
-	Timestamp string        `json:"timestamp"`
-	Type      string        `json:"type"` // "user", "gemini", "info", "error", "warning"
-	Tokens    *geminiTokens `json:"tokens,omitempty"`
-	Model     string        `json:"model,omitempty"`
+	ID        string            `json:"id"`
+	Timestamp string            `json:"timestamp"`
+	Type      string            `json:"type"` // "user", "gemini", "info", "error", "warning"
+	Content   string            `json:"content,omitempty"`
+	Tokens    *geminiTokens     `json:"tokens,omitempty"`
+	Model     string            `json:"model,omitempty"`
+	ToolCalls []geminiToolCall  `json:"toolCalls,omitempty"`
+}
+
+// geminiToolCall represents a tool call in a message
+type geminiToolCall struct {
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	Args        json.RawMessage     `json:"args,omitempty"`
+	Result      []geminiToolResult  `json:"result,omitempty"`
+	Status      string              `json:"status,omitempty"`
+	Timestamp   string              `json:"timestamp,omitempty"`
+	DisplayName string              `json:"displayName,omitempty"`
+}
+
+// geminiToolResult represents the result of a tool call
+type geminiToolResult struct {
+	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+// geminiFunctionResponse represents the function response
+type geminiFunctionResponse struct {
+	ID       string                    `json:"id"`
+	Name     string                    `json:"name"`
+	Response *geminiFunctionResponseData `json:"response,omitempty"`
+}
+
+// geminiFunctionResponseData contains the actual response data
+type geminiFunctionResponseData struct {
+	Output string `json:"output,omitempty"`
 }
 
 // geminiTokens represents token counts for a message
@@ -141,6 +171,7 @@ func (p *GeminiParser) ParseFile(ctx context.Context, path string) (*ImportResul
 	}
 
 	// Process messages
+	messageIndex := 0
 	for _, msg := range session.Messages {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -160,17 +191,19 @@ func (p *GeminiParser) ParseFile(ctx context.Context, path string) (*ImportResul
 			result.LastTime = ts
 		}
 
-		// Create log record
+		// Create transcript log record with actual content
 		logRecord := api.LogRecord{
 			Timestamp:      ts,
 			ServiceName:    SourceGemini.ServiceName(),
 			SeverityText:   mapGeminiSeverity(msg.Type),
 			SeverityNumber: mapGeminiSeverityNumber(msg.Type),
-			Body:           mapGeminiEventName(msg.Type),
+			Body:           msg.Content, // Actual message content!
 			LogAttributes: map[string]string{
-				"event.name":    "gemini_cli." + msg.Type,
+				"event.name":    "transcript.message",
 				"session.id":    session.SessionID,
 				"message.id":    msg.ID,
+				"message.index": fmt.Sprintf("%d", messageIndex),
+				"message.role":  mapGeminiTypeToRole(msg.Type),
 				"import_source": "local_jsonl",
 			},
 		}
@@ -180,8 +213,91 @@ func (p *GeminiParser) ParseFile(ctx context.Context, path string) (*ImportResul
 		if session.ProjectHash != "" {
 			logRecord.LogAttributes["project_hash"] = session.ProjectHash
 		}
+		// Add token counts to attributes for transcript display
+		if msg.Tokens != nil {
+			if msg.Tokens.Input > 0 {
+				logRecord.LogAttributes["input_tokens"] = fmt.Sprintf("%d", msg.Tokens.Input)
+			}
+			if msg.Tokens.Output > 0 {
+				logRecord.LogAttributes["output_tokens"] = fmt.Sprintf("%d", msg.Tokens.Output)
+			}
+			if msg.Tokens.Cached > 0 {
+				logRecord.LogAttributes["cache_read_input_tokens"] = fmt.Sprintf("%d", msg.Tokens.Cached)
+			}
+		}
 		result.Logs = append(result.Logs, logRecord)
 		result.RecordCount++
+		messageIndex++
+
+		// Create separate log entries for tool calls
+		for _, toolCall := range msg.ToolCalls {
+			toolTs := ts // Use message timestamp as fallback
+			if toolCall.Timestamp != "" {
+				if parsed, err := parseGeminiTime(toolCall.Timestamp); err == nil {
+					toolTs = parsed
+				}
+			}
+
+			// Tool use entry
+			toolUseAttrs := map[string]string{
+				"event.name":    "transcript.message",
+				"session.id":    session.SessionID,
+				"message.index": fmt.Sprintf("%d", messageIndex),
+				"message.role":  "tool_use",
+				"tool.name":     toolCall.Name,
+				"import_source": "local_jsonl",
+			}
+			if len(toolCall.Args) > 0 {
+				toolUseAttrs["tool.input"] = string(toolCall.Args)
+			}
+			toolUseLog := api.LogRecord{
+				Timestamp:      toolTs,
+				ServiceName:    SourceGemini.ServiceName(),
+				SeverityText:   "INFO",
+				SeverityNumber: 9,
+				Body:           fmt.Sprintf("Tool call: %s", toolCall.Name),
+				LogAttributes:  toolUseAttrs,
+			}
+			result.Logs = append(result.Logs, toolUseLog)
+			result.RecordCount++
+			messageIndex++
+
+			// Tool result entry (if we have a result)
+			if len(toolCall.Result) > 0 && toolCall.Result[0].FunctionResponse != nil {
+				fr := toolCall.Result[0].FunctionResponse
+				toolOutput := ""
+				if fr.Response != nil {
+					toolOutput = fr.Response.Output
+				}
+
+				toolResultAttrs := map[string]string{
+					"event.name":    "transcript.message",
+					"session.id":    session.SessionID,
+					"message.index": fmt.Sprintf("%d", messageIndex),
+					"message.role":  "tool_result",
+					"tool.name":     toolCall.Name,
+					"import_source": "local_jsonl",
+				}
+				if toolCall.Status != "" {
+					toolResultAttrs["success"] = fmt.Sprintf("%v", toolCall.Status == "success")
+				}
+				if toolOutput != "" {
+					toolResultAttrs["tool.output"] = toolOutput
+				}
+
+				toolResultLog := api.LogRecord{
+					Timestamp:      toolTs,
+					ServiceName:    SourceGemini.ServiceName(),
+					SeverityText:   "INFO",
+					SeverityNumber: 9,
+					Body:           toolOutput,
+					LogAttributes:  toolResultAttrs,
+				}
+				result.Logs = append(result.Logs, toolResultLog)
+				result.RecordCount++
+				messageIndex++
+			}
+		}
 
 		// Create metrics for gemini messages with tokens
 		if msg.Type == "gemini" && msg.Tokens != nil {
@@ -289,6 +405,18 @@ func mapGeminiEventName(msgType string) string {
 		return "info"
 	default:
 		return msgType
+	}
+}
+
+// mapGeminiTypeToRole maps Gemini message type to transcript role
+func mapGeminiTypeToRole(msgType string) string {
+	switch msgType {
+	case "user":
+		return "user"
+	case "gemini":
+		return "assistant"
+	default:
+		return "assistant" // info, warning, error treated as assistant messages
 	}
 }
 

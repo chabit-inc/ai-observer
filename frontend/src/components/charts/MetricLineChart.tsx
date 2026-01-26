@@ -61,6 +61,7 @@ export function MetricLineChart({
           tick={
             {
               fontSize: compact ? 10 : 11,
+              fill: 'var(--color-muted-foreground)',
               angle: needsTiltedLabels ? -45 : 0,
               textAnchor: needsTiltedLabels ? 'end' : 'middle',
               dy: needsTiltedLabels ? 5 : 0,
@@ -71,7 +72,7 @@ export function MetricLineChart({
           {...(compact ? compactAxisStyle : {})}
         />
         <YAxis
-          tick={{ fontSize: compact ? 10 : 12 }}
+          tick={{ fontSize: compact ? 10 : 12, fill: 'var(--color-muted-foreground)' }}
           width={compact ? 50 : undefined}
           tickFormatter={formatYAxis}
           {...(compact ? compactAxisStyle : {})}

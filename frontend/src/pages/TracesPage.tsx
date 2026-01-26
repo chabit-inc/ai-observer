@@ -13,17 +13,12 @@ import { formatDuration, formatTimestamp, getStatusColor, cn } from '@/lib/utils
 import { getServiceDisplayName } from '@/lib/metricMetadata'
 import type { TraceOverview, Span } from '@/types/traces'
 import { ChevronRight, ChevronDown, RefreshCw } from 'lucide-react'
-import {
-  TIMEFRAME_OPTIONS,
-  isAbsoluteTimeSelection,
-  type TimeSelection,
-} from '@/types/dashboard'
+import { isAbsoluteTimeSelection, type TimeSelection } from '@/types/dashboard'
 import { useDebounce } from '@/hooks/useDebounce'
 import { usePagination } from '@/hooks/usePagination'
-import { getLocalStorageValue } from '@/hooks/useLocalStorage'
+import { useTimeSelection } from '@/hooks/useTimeSelection'
 import { toast } from 'sonner'
 import { useTelemetryStore } from '@/stores/telemetryStore'
-import { calculateInterval, calculateTickInterval } from '@/lib/timeUtils'
 
 // localStorage keys
 const TIME_SELECTION_STORAGE_KEY = 'ai-observer-traces-timeselection'
@@ -41,41 +36,11 @@ export function TracesPage() {
   const [search, setSearch] = useState(searchParams.get('search') || '')
   const debouncedSearch = useDebounce(search, 200)
 
-  // Get initial time selection from URL or localStorage
-  const getInitialTimeSelection = (): TimeSelection => {
-    // Check for absolute date range in URL
-    const fromParam = searchParams.get('from')
-    const toParam = searchParams.get('to')
-    if (fromParam && toParam) {
-      const from = new Date(fromParam)
-      const to = new Date(toParam)
-      if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
-        const intervalSeconds = calculateInterval(from, to)
-        const rangeDays = (to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)
-        const bucketCount = Math.ceil((rangeDays * 86400) / intervalSeconds)
-        return {
-          type: 'absolute',
-          range: {
-            from,
-            to,
-            intervalSeconds,
-            tickInterval: calculateTickInterval(bucketCount),
-          },
-        }
-      }
-    }
-
-    // Check for relative timeframe in URL or localStorage
-    const storedSelection = getLocalStorageValue<{ type: string; timeframeValue: string } | null>(TIME_SELECTION_STORAGE_KEY, null)
-    const timeframeParam = searchParams.get('timeframe')
-      || storedSelection?.timeframeValue
-      || '7d'
-    const timeframe = TIMEFRAME_OPTIONS.find((t) => t.value === timeframeParam)
-      || TIMEFRAME_OPTIONS.find((t) => t.value === '7d')!
-    return { type: 'relative', timeframe }
-  }
-
-  const [timeSelection, setTimeSelectionState] = useState<TimeSelection>(getInitialTimeSelection)
+  // Time selection with localStorage persistence
+  const { timeSelection, setTimeSelection, fromTime, toTime } = useTimeSelection({
+    storageKey: TIME_SELECTION_STORAGE_KEY,
+    searchParams,
+  })
 
   // Real-time data from WebSocket
   const recentSpans = useTelemetryStore((state) => state.recentSpans)
@@ -87,23 +52,8 @@ export function TracesPage() {
     storageKey: PAGE_SIZE_STORAGE_KEY,
   })
 
-  // Anchor time for stable pagination (reset on filter changes)
-  const [anchorTime, setAnchorTime] = useState<Date>(new Date())
-
-  // Calculate time range from selected time selection
-  const fromTime = useMemo(() => {
-    if (isAbsoluteTimeSelection(timeSelection)) {
-      return timeSelection.range.from
-    }
-    return new Date(anchorTime.getTime() - timeSelection.timeframe.durationSeconds * 1000)
-  }, [timeSelection, anchorTime])
-
-  const toTime = useMemo(() => {
-    if (isAbsoluteTimeSelection(timeSelection)) {
-      return timeSelection.range.to
-    }
-    return anchorTime
-  }, [timeSelection, anchorTime])
+  // Anchor time for tracking new traces (used by refresh button)
+  const [anchorTime, setAnchorTime] = useState<Date>(() => new Date())
 
   // Count unique new traces since anchor time
   const newTracesCount = useMemo(() => {
@@ -128,12 +78,6 @@ export function TracesPage() {
     }
     fetchServices()
   }, [])
-
-  // Reset pagination and anchor time when filters change
-  useEffect(() => {
-    resetToFirstPage()
-    setAnchorTime(new Date())
-  }, [service, debouncedSearch, timeSelection, resetToFirstPage])
 
   useEffect(() => {
     const abortController = new AbortController()
@@ -216,25 +160,14 @@ export function TracesPage() {
   }
 
   const handleServiceChange = (value: string) => {
+    resetToFirstPage()
     setService(value)
     updateSearchParams({ service: value })
   }
 
   const handleTimeSelectionChange = (selection: TimeSelection) => {
-    setTimeSelectionState(selection)
-
-    // Persist relative selections to localStorage
-    if (!isAbsoluteTimeSelection(selection)) {
-      try {
-        localStorage.setItem(
-          TIME_SELECTION_STORAGE_KEY,
-          JSON.stringify({ type: 'relative', timeframeValue: selection.timeframe.value })
-        )
-      } catch {
-        // Ignore storage errors
-      }
-    }
-
+    resetToFirstPage()
+    setTimeSelection(selection) // Also persists to localStorage
     updateSearchParams({ timeSelection: selection })
   }
 
@@ -306,7 +239,10 @@ export function TracesPage() {
               <Input
                 placeholder="Search spans, errors, attributes..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  resetToFirstPage()
+                  setSearch(e.target.value)
+                }}
               />
             </div>
           </div>

@@ -38,6 +38,10 @@ func (s *Server) setupRoutes(h *handlers.Handlers) error {
 		r.Get("/logs", h.QueryLogs)
 		r.Get("/logs/levels", h.GetLogLevels)
 
+		// Sessions
+		r.Get("/sessions", h.QuerySessions)
+		r.Get("/sessions/{sessionId}/transcript", h.GetSessionTranscript)
+
 		// Services
 		r.Get("/services", h.ListServices)
 

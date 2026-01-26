@@ -80,10 +80,40 @@ func (p *CodexParser) FindSessionFiles(ctx context.Context) ([]string, error) {
 }
 
 // codexJSONLEntry represents a single line in Codex CLI JSONL files
+// Format: { "timestamp": "...", "type": "session_meta|response_item|event_msg|...", "payload": {...} }
 type codexJSONLEntry struct {
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Payload   json.RawMessage `json:"payload"`
+}
+
+// codexResponseItem represents a ResponseItem in the rollout file
+// Types: message, function_call, function_call_output, reasoning, local_shell_call, etc.
+type codexResponseItem struct {
+	Type string `json:"type"`
+	// For "message" type
+	Role    string               `json:"role,omitempty"`
+	Content []codexContentItem   `json:"content,omitempty"`
+	// For "function_call" type
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	// For "function_call_output" type
+	Output json.RawMessage `json:"output,omitempty"`
+	// For "reasoning" type
+	Summary []codexReasoningSummary `json:"summary,omitempty"`
+}
+
+// codexContentItem represents content within a message
+type codexContentItem struct {
+	Type string `json:"type"` // "input_text", "output_text", "input_image"
+	Text string `json:"text,omitempty"`
+}
+
+// codexReasoningSummary represents reasoning summary
+type codexReasoningSummary struct {
+	Type string `json:"type"` // "summary_text"
+	Text string `json:"text,omitempty"`
 }
 
 // codexSessionMeta represents session metadata
@@ -143,6 +173,7 @@ func (p *CodexParser) ParseFile(ctx context.Context, path string) (*ImportResult
 	var sessionMeta *codexSessionMeta
 	var currentModel string
 	var lastTokenCount *codexTokenCount
+	messageIndex := 0 // Track message order for transcripts
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -312,6 +343,167 @@ func (p *CodexParser) ParseFile(ctx context.Context, path string) (*ImportResult
 				if turnCtx.Model != "" {
 					currentModel = turnCtx.Model
 				}
+			}
+
+		case "response_item":
+			// Handle ResponseItem entries for transcript content
+			var respItem codexResponseItem
+			if err := json.Unmarshal(entry.Payload, &respItem); err != nil {
+				continue
+			}
+
+			sessionID := result.SessionID
+			if sessionMeta != nil && sessionMeta.ID != "" {
+				sessionID = sessionMeta.ID
+			}
+
+			switch respItem.Type {
+			case "message":
+				// Extract text content from message
+				var textContent string
+				for _, content := range respItem.Content {
+					if content.Type == "input_text" || content.Type == "output_text" {
+						if textContent != "" {
+							textContent += "\n"
+						}
+						textContent += content.Text
+					}
+				}
+
+				// Only create log if we have actual content
+				if textContent == "" {
+					continue
+				}
+
+				// Map role to transcript role
+				role := respItem.Role
+				if role == "" {
+					role = "assistant"
+				}
+
+				logRecord := api.LogRecord{
+					Timestamp:      ts,
+					ServiceName:    SourceCodex.ServiceName(),
+					SeverityText:   "INFO",
+					SeverityNumber: 9,
+					Body:           textContent,
+					LogAttributes: map[string]string{
+						"event.name":    "transcript.message",
+						"session.id":    sessionID,
+						"message.index": fmt.Sprintf("%d", messageIndex),
+						"message.role":  role,
+						"import_source": "local_jsonl",
+					},
+				}
+				if currentModel != "" {
+					logRecord.LogAttributes["model"] = currentModel
+				}
+				result.Logs = append(result.Logs, logRecord)
+				result.RecordCount++
+				messageIndex++
+
+			case "function_call":
+				// Tool use entry
+				logRecord := api.LogRecord{
+					Timestamp:      ts,
+					ServiceName:    SourceCodex.ServiceName(),
+					SeverityText:   "INFO",
+					SeverityNumber: 9,
+					Body:           fmt.Sprintf("Tool call: %s", respItem.Name),
+					LogAttributes: map[string]string{
+						"event.name":    "transcript.message",
+						"session.id":    sessionID,
+						"message.index": fmt.Sprintf("%d", messageIndex),
+						"message.role":  "tool_use",
+						"tool.name":     respItem.Name,
+						"import_source": "local_jsonl",
+					},
+				}
+				if respItem.Arguments != "" {
+					logRecord.LogAttributes["tool.input"] = respItem.Arguments
+				}
+				if respItem.CallID != "" {
+					logRecord.LogAttributes["tool.call_id"] = respItem.CallID
+				}
+				result.Logs = append(result.Logs, logRecord)
+				result.RecordCount++
+				messageIndex++
+
+			case "function_call_output":
+				// Tool result entry
+				var outputContent string
+				// Try to parse output - it could be a string or a JSON object
+				if len(respItem.Output) > 0 {
+					// First try as string
+					var strOutput string
+					if err := json.Unmarshal(respItem.Output, &strOutput); err == nil {
+						outputContent = strOutput
+					} else {
+						// Otherwise use raw JSON
+						outputContent = string(respItem.Output)
+					}
+				}
+
+				logRecord := api.LogRecord{
+					Timestamp:      ts,
+					ServiceName:    SourceCodex.ServiceName(),
+					SeverityText:   "INFO",
+					SeverityNumber: 9,
+					Body:           outputContent,
+					LogAttributes: map[string]string{
+						"event.name":    "transcript.message",
+						"session.id":    sessionID,
+						"message.index": fmt.Sprintf("%d", messageIndex),
+						"message.role":  "tool_result",
+						"import_source": "local_jsonl",
+					},
+				}
+				if outputContent != "" {
+					logRecord.LogAttributes["tool.output"] = outputContent
+				}
+				if respItem.CallID != "" {
+					logRecord.LogAttributes["tool.call_id"] = respItem.CallID
+				}
+				result.Logs = append(result.Logs, logRecord)
+				result.RecordCount++
+				messageIndex++
+
+			case "reasoning":
+				// Extract reasoning summary text
+				var reasoningText string
+				for _, summary := range respItem.Summary {
+					if summary.Type == "summary_text" && summary.Text != "" {
+						if reasoningText != "" {
+							reasoningText += "\n"
+						}
+						reasoningText += summary.Text
+					}
+				}
+
+				if reasoningText == "" {
+					continue
+				}
+
+				logRecord := api.LogRecord{
+					Timestamp:      ts,
+					ServiceName:    SourceCodex.ServiceName(),
+					SeverityText:   "INFO",
+					SeverityNumber: 9,
+					Body:           reasoningText,
+					LogAttributes: map[string]string{
+						"event.name":    "transcript.message",
+						"session.id":    sessionID,
+						"message.index": fmt.Sprintf("%d", messageIndex),
+						"message.role":  "assistant", // Reasoning is from the assistant
+						"import_source": "local_jsonl",
+					},
+				}
+				if currentModel != "" {
+					logRecord.LogAttributes["model"] = currentModel
+				}
+				result.Logs = append(result.Logs, logRecord)
+				result.RecordCount++
+				messageIndex++
 			}
 		}
 	}

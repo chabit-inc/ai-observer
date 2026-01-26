@@ -9,6 +9,8 @@ import { TracesPage } from '@/pages/TracesPage'
 import { TraceDetailPage } from '@/pages/TraceDetailPage'
 import { MetricsPage } from '@/pages/MetricsPage'
 import { LogsPage } from '@/pages/LogsPage'
+import { SessionsPage } from '@/pages/SessionsPage'
+import { SessionTranscriptPage } from '@/pages/SessionTranscriptPage'
 import { DocsPage } from '@/pages/DocsPage'
 
 function App() {
@@ -46,6 +48,16 @@ function App() {
               <Route path="logs" element={
                 <ErrorBoundary>
                   <LogsPage />
+                </ErrorBoundary>
+              } />
+              <Route path="sessions" element={
+                <ErrorBoundary>
+                  <SessionsPage />
+                </ErrorBoundary>
+              } />
+              <Route path="sessions/:sessionId" element={
+                <ErrorBoundary>
+                  <SessionTranscriptPage />
                 </ErrorBoundary>
               } />
               <Route path="docs" element={
