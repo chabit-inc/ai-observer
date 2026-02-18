@@ -1,0 +1,17 @@
+.git
+.github
+.claude
+.DS_Store
+bin/
+data/
+external-projects/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+backend/internal/frontend/dist/
+*.duckdb
+*.duckdb.wal
+*.md
+!README.md
+docs/
+scripts/

@@ -1,0 +1,29 @@
+services:
+  ai-observer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGETARCH: ${TARGETARCH:-arm64}
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AI_OBSERVER_FRONTEND_URL=http://ai-observer.localhost
+    networks:
+      - traefik-public
+    labels:
+      # Dashboard / API (port 8080)
+      - "traefik.enable=true"
+      - "traefik.http.routers.ai-observer-web.rule=Host(`ai-observer.localhost`)"
+      - "traefik.http.routers.ai-observer-web.entrypoints=web"
+      - "traefik.http.routers.ai-observer-web.service=ai-observer-web"
+      - "traefik.http.services.ai-observer-web.loadbalancer.server.port=8080"
+      # OTLP ingestion (port 4318)
+      - "traefik.http.routers.ai-observer-otlp.rule=Host(`otlp.ai-observer.localhost`)"
+      - "traefik.http.routers.ai-observer-otlp.entrypoints=web"
+      - "traefik.http.routers.ai-observer-otlp.service=ai-observer-otlp"
+      - "traefik.http.services.ai-observer-otlp.loadbalancer.server.port=4318"
+
+networks:
+  traefik-public:
+    external: true
