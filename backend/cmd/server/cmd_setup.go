@@ -57,10 +57,19 @@ func printSetupInstructionsWithError(tool string) error {
 	}
 }
 
+func otlpEndpoint() string {
+	if e := os.Getenv("AI_OBSERVER_OTLP_ENDPOINT"); e != "" {
+		return e
+	}
+	return "http://localhost:4318"
+}
+
 func printSetupInstructions(tool string) {
+	endpoint := otlpEndpoint()
+
 	switch tool {
 	case "claude-code":
-		fmt.Print(`Claude Code Setup
+		fmt.Printf(`Claude Code Setup
 =================
 
 Add to ~/.bashrc or ~/.zshrc:
@@ -74,7 +83,7 @@ export OTEL_LOGS_EXPORTER=otlp          # Options: otlp, console
 
 # 3. Configure OTLP endpoint (for OTLP exporter)
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_ENDPOINT=%s
 
 # 4. For faster visibilty: reduce export intervals
 export OTEL_METRIC_EXPORT_INTERVAL=10000  # 10 seconds (default: 60000ms)
@@ -82,9 +91,9 @@ export OTEL_LOGS_EXPORT_INTERVAL=5000     # 5 seconds (default: 5000ms)
 
 # 5. Log prompts
 export OTEL_LOG_USER_PROMPTS=1
-`)
+`, endpoint)
 	case "gemini":
-		fmt.Print(`Gemini CLI Setup
+		fmt.Printf(`Gemini CLI Setup
 ================
 
 1. Add to ~/.gemini/settings.json:
@@ -94,7 +103,7 @@ export OTEL_LOG_USER_PROMPTS=1
     "enabled": true,
     "target": "local",
     "otlpProtocol": "http",
-    "otlpEndpoint": "http://localhost:4318",
+    "otlpEndpoint": "%s",
     "logPrompts": true,
     "useCollector": true
   }
@@ -105,18 +114,18 @@ export OTEL_LOG_USER_PROMPTS=1
 # Mitigate Gemini CLI bug
 export OTEL_METRIC_EXPORT_TIMEOUT=10000
 export OTEL_LOGS_EXPORT_TIMEOUT=5000
-`)
+`, endpoint)
 	case "codex":
-		fmt.Print(`OpenAI Codex CLI Setup
+		fmt.Printf(`OpenAI Codex CLI Setup
 ======================
 
 Add to ~/.codex/config.toml:
 
 [otel]
-exporter = { otlp-http = { endpoint = "http://localhost:4318/v1/logs", protocol = "binary" } }
-trace_exporter = { otlp-http = { endpoint = "http://localhost:4318/v1/traces", protocol = "binary" } }
+exporter = { otlp-http = { endpoint = "%s/v1/logs", protocol = "binary" } }
+trace_exporter = { otlp-http = { endpoint = "%s/v1/traces", protocol = "binary" } }
 log_user_prompt = true
-`)
+`, endpoint, endpoint)
 	default:
 		fmt.Printf("Unknown tool: %s\n\nSupported tools: claude-code, gemini, codex\n", tool)
 		os.Exit(1)
